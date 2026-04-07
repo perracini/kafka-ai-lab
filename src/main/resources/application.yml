@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: kafka-ai-lab
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: kafka-ai-lab
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        model: llama3.2
+        options:
+          temperature: 0.3
+          num-predict: 256
+
+server:
+  port: 8082
