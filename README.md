@@ -185,17 +185,20 @@ src/main/java/com/rafaelperracini/kafkaailab/
 │   ├── PedidoProducer.java                  # Publica no tópico "pedidos"
 │   └── PedidoConsumer.java                  # Consome, classifica com IA, republica
 └── service/
+    ├── PedidoService.java                   # Interface — criação e consulta de pedidos
     ├── ClassificadorRiscoService.java       # Interface — classificação de risco
     └── impl/
+        ├── PedidoServiceImpl.java           # Implementação — orquestra Producer/Consumer
         └── ClassificadorRiscoServiceImpl.java  # Implementação — ChatClient + Ollama
 ```
 
 ## Arquitetura
 
-- **Controller** — apenas HTTP, sem lógica. Delega ao Producer e Consumer.
+- **Controller** — apenas HTTP, sem lógica. Delega ao PedidoService.
+- **Service (PedidoService)** — orquestra criação de ID, envio ao Producer e consulta de resultados.
+- **Service (ClassificadorRisco)** — interface + impl SOLID. A IA fica isolada no ClassificadorRiscoServiceImpl.
 - **Producer** — serializa Pedido em JSON e publica no Kafka
 - **Consumer** — consome evento, chama service de IA, republica resultado
-- **Service** — interface + impl SOLID. A IA fica isolada no ClassificadorRiscoServiceImpl.
 - **Config** — Kafka embutido como @Bean. Remover esta classe = usar Kafka real.
 - **DTOs** — records imutáveis para dados de entrada e saída
 
