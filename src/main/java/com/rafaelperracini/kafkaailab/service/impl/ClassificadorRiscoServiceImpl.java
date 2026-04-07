@@ -2,32 +2,25 @@ package com.rafaelperracini.kafkaailab.service.impl;
 
 import com.rafaelperracini.kafkaailab.dto.Pedido;
 import com.rafaelperracini.kafkaailab.dto.PedidoClassificado;
+import com.rafaelperracini.kafkaailab.gateway.OllamaGateway;
 import com.rafaelperracini.kafkaailab.service.ClassificadorRiscoService;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
-/**
- * Classifica o risco de fraude de um pedido usando IA (Llama 3.2 via Ollama).
- *
- * O prompt envia os dados do pedido e pede classificacao em ALTO, MEDIO ou BAIXO.
- * A IA responde com a classificacao e uma justificativa curta.
- */
 @Service
 public class ClassificadorRiscoServiceImpl implements ClassificadorRiscoService {
 
-    private final ChatClient chatClient;
+    private static final String SYSTEM_PROMPT =
+            "Voce e um analista de risco de fraude em e-commerce. " +
+            "Classifique pedidos como ALTO, MEDIO ou BAIXO risco. " +
+            "Responda SEMPRE neste formato exato:\n" +
+            "RISCO: [ALTO|MEDIO|BAIXO]\n" +
+            "JUSTIFICATIVA: [uma frase curta]\n" +
+            "Nao adicione nada alem dessas duas linhas.";
 
-    public ClassificadorRiscoServiceImpl(ChatClient.Builder chatClientBuilder) {
-        this.chatClient = chatClientBuilder
-                .defaultSystem(
-                    "Voce e um analista de risco de fraude em e-commerce. " +
-                    "Classifique pedidos como ALTO, MEDIO ou BAIXO risco. " +
-                    "Responda SEMPRE neste formato exato:\n" +
-                    "RISCO: [ALTO|MEDIO|BAIXO]\n" +
-                    "JUSTIFICATIVA: [uma frase curta]\n" +
-                    "Nao adicione nada alem dessas duas linhas."
-                )
-                .build();
+    private final OllamaGateway ollamaGateway;
+
+    public ClassificadorRiscoServiceImpl(OllamaGateway ollamaGateway) {
+        this.ollamaGateway = ollamaGateway;
     }
 
     @Override
@@ -41,10 +34,7 @@ public class ClassificadorRiscoServiceImpl implements ClassificadorRiscoService 
             pedido.cliente(), pedido.valor(), pedido.descricao(), pedido.quantidadeItens()
         );
 
-        String resposta = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .content();
+        String resposta = ollamaGateway.chat(SYSTEM_PROMPT, prompt);
 
         String risco = extrairRisco(resposta);
         String justificativa = extrairJustificativa(resposta);

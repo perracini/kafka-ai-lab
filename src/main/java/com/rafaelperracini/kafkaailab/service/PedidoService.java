@@ -11,4 +11,6 @@ public interface PedidoService {
     Map<String, String> criar(Pedido pedido);
 
     List<PedidoClassificado> listarClassificados();
+
+    void processar(Pedido pedido);
 }

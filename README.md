@@ -181,24 +181,35 @@ src/main/java/com/rafaelperracini/kafkaailab/
 ├── dto/
 │   ├── Pedido.java                          # Record — dados do pedido
 │   └── PedidoClassificado.java              # Record — pedido + risco + justificativa
+├── gateway/
+│   ├── OllamaGateway.java                  # Interface — chamadas ao Ollama (LLM)
+│   ├── PedidoKafkaGateway.java             # Interface — publicação nos tópicos Kafka
+│   └── impl/
+│       ├── OllamaGatewayImpl.java          # Implementação — ChatClient
+│       └── PedidoKafkaGatewayImpl.java     # Implementação — KafkaTemplate + ObjectMapper
 ├── kafka/
-│   ├── PedidoProducer.java                  # Publica no tópico "pedidos"
-│   └── PedidoConsumer.java                  # Consome, classifica com IA, republica
+│   └── PedidoConsumer.java                  # Listener — desserializa e delega ao Service
+├── repository/
+│   ├── PedidoClassificadoRepository.java   # Interface — armazenamento de resultados
+│   └── impl/
+│       └── PedidoClassificadoRepositoryImpl.java  # Implementação — in-memory (CopyOnWriteArrayList)
 └── service/
-    ├── PedidoService.java                   # Interface — criação e consulta de pedidos
+    ├── PedidoService.java                   # Interface — criação, consulta e processamento
     ├── ClassificadorRiscoService.java       # Interface — classificação de risco
     └── impl/
-        ├── PedidoServiceImpl.java           # Implementação — orquestra Producer/Consumer
-        └── ClassificadorRiscoServiceImpl.java  # Implementação — ChatClient + Ollama
+        ├── PedidoServiceImpl.java           # Implementação — orquestra gateways + repository
+        └── ClassificadorRiscoServiceImpl.java  # Implementação — delega ao OllamaGateway
 ```
 
 ## Arquitetura
 
 - **Controller** — apenas HTTP, sem lógica. Delega ao PedidoService.
-- **Service (PedidoService)** — orquestra criação de ID, envio ao Producer e consulta de resultados.
-- **Service (ClassificadorRisco)** — interface + impl SOLID. A IA fica isolada no ClassificadorRiscoServiceImpl.
-- **Producer** — serializa Pedido em JSON e publica no Kafka
-- **Consumer** — consome evento, chama service de IA, republica resultado
+- **Service (PedidoService)** — orquestra criação de ID, publicação via gateway, classificação e armazenamento.
+- **Service (ClassificadorRisco)** — regra de negócio: monta prompt e interpreta resposta da IA.
+- **Gateway (OllamaGateway)** — encapsula chamadas ao LLM (Ollama/Llama 3.2).
+- **Gateway (PedidoKafkaGateway)** — encapsula publicação nos tópicos Kafka.
+- **Repository** — armazena pedidos classificados (in-memory para dev).
+- **Consumer** — listener Kafka: apenas desserializa e delega ao Service.
 - **Config** — Kafka embutido como @Bean. Remover esta classe = usar Kafka real.
 - **DTOs** — records imutáveis para dados de entrada e saída
 

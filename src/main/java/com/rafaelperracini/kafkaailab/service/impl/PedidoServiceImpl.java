@@ -2,8 +2,9 @@ package com.rafaelperracini.kafkaailab.service.impl;
 
 import com.rafaelperracini.kafkaailab.dto.Pedido;
 import com.rafaelperracini.kafkaailab.dto.PedidoClassificado;
-import com.rafaelperracini.kafkaailab.kafka.PedidoConsumer;
-import com.rafaelperracini.kafkaailab.kafka.PedidoProducer;
+import com.rafaelperracini.kafkaailab.gateway.PedidoKafkaGateway;
+import com.rafaelperracini.kafkaailab.repository.PedidoClassificadoRepository;
+import com.rafaelperracini.kafkaailab.service.ClassificadorRiscoService;
 import com.rafaelperracini.kafkaailab.service.PedidoService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,12 +19,16 @@ public class PedidoServiceImpl implements PedidoService {
 
     private static final Logger log = LoggerFactory.getLogger(PedidoServiceImpl.class);
 
-    private final PedidoProducer producer;
-    private final PedidoConsumer consumer;
+    private final PedidoKafkaGateway kafkaGateway;
+    private final ClassificadorRiscoService classificadorService;
+    private final PedidoClassificadoRepository repository;
 
-    public PedidoServiceImpl(PedidoProducer producer, PedidoConsumer consumer) {
-        this.producer = producer;
-        this.consumer = consumer;
+    public PedidoServiceImpl(PedidoKafkaGateway kafkaGateway,
+                             ClassificadorRiscoService classificadorService,
+                             PedidoClassificadoRepository repository) {
+        this.kafkaGateway = kafkaGateway;
+        this.classificadorService = classificadorService;
+        this.repository = repository;
     }
 
     @Override
@@ -33,7 +38,7 @@ public class PedidoServiceImpl implements PedidoService {
                 pedido.descricao(), pedido.quantidadeItens());
 
         try {
-            producer.enviar(pedidoComId);
+            kafkaGateway.publicarPedido(pedidoComId);
         } catch (Exception e) {
             log.error("Erro ao enviar pedido ao Kafka: {}", e.getMessage(), e);
             return Map.of("status", "Erro ao enviar pedido", "erro", e.getMessage());
@@ -48,6 +53,17 @@ public class PedidoServiceImpl implements PedidoService {
 
     @Override
     public List<PedidoClassificado> listarClassificados() {
-        return consumer.getResultados();
+        return repository.listarTodos();
+    }
+
+    @Override
+    public void processar(Pedido pedido) {
+        log.info("Pedido recebido: {} — classificando risco com IA...", pedido.id());
+
+        PedidoClassificado classificado = classificadorService.classificar(pedido);
+        log.info("Pedido {} classificado: RISCO={}", pedido.id(), classificado.risco());
+
+        kafkaGateway.publicarClassificacao(pedido.id(), classificado);
+        repository.salvar(classificado);
     }
 }
