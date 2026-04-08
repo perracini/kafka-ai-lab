@@ -4,10 +4,15 @@ import com.rafaelperracini.kafkaailab.dto.Pedido;
 import com.rafaelperracini.kafkaailab.dto.PedidoClassificado;
 import com.rafaelperracini.kafkaailab.gateway.OllamaGateway;
 import com.rafaelperracini.kafkaailab.service.ClassificadorRiscoService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ClassificadorRiscoServiceImpl implements ClassificadorRiscoService {
+
+    private static final Logger log = LoggerFactory.getLogger(ClassificadorRiscoServiceImpl.class);
 
     private static final String SYSTEM_PROMPT =
             "Voce e um analista de risco de fraude em e-commerce. " +
@@ -24,7 +29,9 @@ public class ClassificadorRiscoServiceImpl implements ClassificadorRiscoService 
     }
 
     @Override
+    @Cacheable(value = "classificacoes", key = "#pedido.descricao() + '|' + #pedido.valor() + '|' + #pedido.quantidadeItens()")
     public PedidoClassificado classificar(Pedido pedido) {
+        log.info("Cache MISS — chamando IA para classificar pedido: {}", pedido.id());
         String prompt = String.format(
             "Classifique o risco de fraude deste pedido:\n" +
             "- Cliente: %s\n" +

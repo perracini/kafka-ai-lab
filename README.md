@@ -9,6 +9,10 @@ Microsserviço Spring Boot que integra Kafka com IA local (Ollama) para classifi
 - Java 17+ / Spring Boot 3.5.0
 - Spring Kafka + Kafka embutido (spring-kafka-test em escopo compile)
 - Spring AI 1.1.4 + Ollama com Llama 3.2 (3B)
+- Spring Boot Actuator + Micrometer (observabilidade)
+- Spring Retry (retry com backoff exponencial + fallback)
+- Caffeine Cache (cache de respostas da IA)
+- Semaphore-based Rate Limiter (limite de chamadas concorrentes)
 - Maven (wrapper incluso)
 
 ## Como rodar
@@ -85,6 +89,76 @@ para o cluster Kafka real. O resto do código não muda.
 
 ---
 
+---
+
+## Conceito: Observabilidade e Resiliencia em chamadas de IA
+
+Chamar um LLM local (Ollama) ou remoto (API) pode falhar, demorar ou sobrecarregar o sistema.
+Este projeto implementa 4 camadas de protecao:
+
+### 1. Metricas customizadas (Micrometer)
+
+O `OllamaGatewayImpl` registra metricas automaticamente a cada chamada:
+
+- **`ai.chat.duration`** (Timer) — latencia de cada chamada ao Ollama
+- **`ai.chat.calls`** (Counter, tag `status=success|error`) — total de chamadas com sucesso/erro
+- **`ai.chat.rejected`** (Counter) — chamadas rejeitadas pelo rate limiter
+
+Essas metricas ficam disponiveis via Actuator (`/actuator/metrics/ai.chat.duration`) e tambem
+num endpoint customizado `GET /metricas/ia` que retorna um resumo consolidado.
+
+### 2. Retry com fallback (Spring Retry)
+
+```java
+@Retryable(maxAttempts = 3, backoff = @Backoff(delay = 2000, multiplier = 2))
+public String chat(String systemPrompt, String userMessage) { ... }
+
+@Recover
+public String chatFallback(Exception e, String systemPrompt, String userMessage) {
+    return "RISCO: INDEFINIDO\nJUSTIFICATIVA: Servico de IA indisponivel...";
+}
+```
+
+- **3 tentativas** com backoff exponencial: 2s, 4s, 8s
+- Se todas falharem, o `@Recover` retorna uma classificacao segura ("INDEFINIDO")
+- O consumer Kafka nao quebra — o pedido e classificado como pendente de revisao manual
+
+### 3. Cache de respostas (Caffeine)
+
+```java
+@Cacheable(value = "classificacoes",
+           key = "#pedido.descricao() + '|' + #pedido.valor() + '|' + #pedido.quantidadeItens()")
+```
+
+- **Key**: `descricao|valor|quantidadeItens` — mesmo padrao de pedido = mesmo risco, evita chamada redundante a IA
+- **Separador `|`** na key evita colisoes por concatenacao (ex: `"abc" + "10.0"` vs `"abc1" + "0.0"`)
+- **TTL**: 300s (5 min) via `expireAfterWrite` — o cache expira automaticamente
+- **Max entries**: 100 — evita consumo excessivo de memoria
+
+**Sobre invalidacao do cache:** a estrategia atual e TTL automatico (`expireAfterWrite=300s`),
+sem necessidade de endpoint manual. Para cenarios mais complexos em producao, alternativas incluem:
+- `expireAfterAccess` — expira apos N segundos sem acesso (entradas populares vivem mais)
+- Event-driven — um topico Kafka `modelo-atualizado` dispara `@CacheEvict(allEntries = true)` quando o modelo de IA muda
+- `refreshAfterWrite` — refresh assincrono em background (requer `CacheLoader`)
+
+**Nota:** a key do cache exclui propositalmente o campo `cliente`. Para este exercicio, a classificacao
+de risco depende do padrao do pedido (produto/valor/quantidade), nao de quem comprou. Em um sistema
+de fraud detection real, o historico e perfil do cliente seriam fatores relevantes e deveriam
+compor a chave do cache ou invalidar entries associadas.
+
+### 4. Rate Limiting (Semaphore)
+
+```java
+private static final int MAX_CONCURRENT_AI_CALLS = 2;
+private final Semaphore semaphore = new Semaphore(MAX_CONCURRENT_AI_CALLS);
+```
+
+- Maximo de **2 chamadas simultaneas** ao Ollama (LLM local e single-threaded, mais que isso nao ajuda)
+- Se o limite for atingido, a chamada e rejeitada imediatamente (`tryAcquire`, nao-bloqueante)
+- Chamadas rejeitadas sao contabilizadas na metrica `ai.chat.rejected`
+
+---
+
 ## Endpoints
 
 ### POST /pedidos — Envia pedido ao Kafka
@@ -131,6 +205,28 @@ Retorna todos os pedidos já classificados pela IA.
 ]
 ```
 
+### GET /metricas/ia — Metricas customizadas da IA
+
+Retorna um resumo consolidado das metricas de chamadas ao Ollama.
+
+**Resposta:**
+```json
+{
+  "totalChamadas": 1,
+  "chamadaComSucesso": 1,
+  "chamadaComErro": 0,
+  "chamadaRejeitadaRateLimit": 0,
+  "latenciaMediaMs": 8349,
+  "latenciaMaxMs": 8349
+}
+```
+
+### Actuator endpoints
+
+- `GET /actuator/health` — status da aplicacao (inclui Kafka e disco)
+- `GET /actuator/metrics` — lista de todas as metricas disponiveis
+- `GET /actuator/metrics/ai.chat.duration` — latencia detalhada das chamadas a IA
+
 ---
 
 ## Conceito: Integração Kafka + IA (o Consumer)
@@ -175,9 +271,11 @@ A temperatura é **0.3** (baixa) porque classificação precisa ser determiníst
 src/main/java/com/rafaelperracini/kafkaailab/
 ├── KafkaAiLabApplication.java               # Main
 ├── config/
-│   └── EmbeddedKafkaConfig.java             # Kafka embutido (sem Docker)
+│   ├── EmbeddedKafkaConfig.java             # Kafka embutido (sem Docker)
+│   └── RateLimiterConfig.java               # Rate limiter via Semaphore (max 2 chamadas)
 ├── controller/
-│   └── PedidoController.java               # POST /pedidos, GET /pedidos/classificados
+│   ├── PedidoController.java               # POST /pedidos, GET /pedidos/classificados
+│   └── MetricasController.java             # GET /metricas/ia — resumo de metricas da IA
 ├── dto/
 │   ├── Pedido.java                          # Record — dados do pedido
 │   └── PedidoClassificado.java              # Record — pedido + risco + justificativa
@@ -185,7 +283,7 @@ src/main/java/com/rafaelperracini/kafkaailab/
 │   ├── OllamaGateway.java                  # Interface — chamadas ao Ollama (LLM)
 │   ├── PedidoKafkaGateway.java             # Interface — publicação nos tópicos Kafka
 │   └── impl/
-│       ├── OllamaGatewayImpl.java          # Implementação — ChatClient
+│       ├── OllamaGatewayImpl.java          # Implementação — ChatClient + métricas + retry + fallback
 │       └── PedidoKafkaGatewayImpl.java     # Implementação — KafkaTemplate + ObjectMapper
 ├── kafka/
 │   └── PedidoConsumer.java                  # Listener — desserializa e delega ao Service
@@ -198,7 +296,7 @@ src/main/java/com/rafaelperracini/kafkaailab/
     ├── ClassificadorRiscoService.java       # Interface — classificação de risco
     └── impl/
         ├── PedidoServiceImpl.java           # Implementação — orquestra gateways + repository
-        └── ClassificadorRiscoServiceImpl.java  # Implementação — delega ao OllamaGateway
+        └── ClassificadorRiscoServiceImpl.java  # Implementação — delega ao OllamaGateway + cache
 ```
 
 ## Arquitetura
@@ -206,8 +304,9 @@ src/main/java/com/rafaelperracini/kafkaailab/
 - **Controller** — apenas HTTP, sem lógica. Delega ao PedidoService.
 - **Service (PedidoService)** — orquestra criação de ID, publicação via gateway, classificação e armazenamento.
 - **Service (ClassificadorRisco)** — regra de negócio: monta prompt e interpreta resposta da IA.
-- **Gateway (OllamaGateway)** — encapsula chamadas ao LLM (Ollama/Llama 3.2).
+- **Gateway (OllamaGateway)** — encapsula chamadas ao LLM (Ollama/Llama 3.2) com metricas, retry e fallback.
 - **Gateway (PedidoKafkaGateway)** — encapsula publicação nos tópicos Kafka.
+- **Config (RateLimiterConfig)** — limita chamadas concorrentes a IA via Semaphore.
 - **Repository** — armazena pedidos classificados (in-memory para dev).
 - **Consumer** — listener Kafka: apenas desserializa e delega ao Service.
 - **Config** — Kafka embutido como @Bean. Remover esta classe = usar Kafka real.

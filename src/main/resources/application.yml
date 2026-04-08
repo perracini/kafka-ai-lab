@@ -22,3 +22,20 @@ spring:
 
 server:
   port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,info
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: kafka-ai-lab
+
+spring.cache:
+  type: caffeine
+  caffeine:
+    spec: maximumSize=100,expireAfterWrite=300s
