@@ -1,5 +1,10 @@
 # Kafka AI Lab
 
+> **Projeto de aprendizado** — parte de um plano de estudo de IA para Java Senior.
+> Foco em explorar conceitos e APIs. Para projetos com arquitetura profissional,
+> veja [suporte-inteligente](https://github.com/perracini/suporte-inteligente)
+> e [investidor-inteligente](https://github.com/perracini/investidor-inteligente).
+
 Microsserviço Spring Boot que integra Kafka com IA local (Ollama) para classificação de risco de pedidos.
 
 **Sem Docker.** O Kafka sobe programaticamente junto com a aplicação (Embedded Kafka).
